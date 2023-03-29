@@ -218,12 +218,13 @@ def insert_tweet(connection,tweet):
                 :text, :country_code, :state_code, :lang, :place_name, :geo)
             ''')
 
-        keys = ('id_users', 'created_at', 'in_reply_to_status_id',
+        keys = ('created_at', 'in_reply_to_status_id',
                 'in_reply_to_user_id', 'quoted_status_id', 'retweet_count', 'favorite_count',
                 'quote_count', 'withheld_copyright', 'source', 'lang')
 
-        d = {key: remove_nulls(tweet['user'].get(key)) for key in keys}
+        d = {key: remove_nulls(tweet.get(key)) for key in keys}
         d['id_tweets']=tweet['id']
+        d['id_users']=tweet.get('in_reply_to_user_id')
         d['geo']=geo_str + "(" + geo_coords + ")"   # http://postgis.net/workshops/postgis-intro/geometries.html
         d['text']=remove_nulls(text)
         d['country_code']=country_code
