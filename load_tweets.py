@@ -134,7 +134,7 @@ def insert_tweet(connection,tweet):
         d = {key: remove_nulls(tweet['user'].get(key)) for key in keys}
         d['id_urls'] = user_id_urls
         d['withheld_in_countries'] = [remove_nulls(s) for s in tweet['user'].get('withheld_in_countries', [])]
-        res = connectiogeon.execute(sql,d).first()
+        res = connection.execute(sql,d).first()
 
         ########################################
         # insert into the tweets table
