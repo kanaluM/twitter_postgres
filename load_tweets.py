@@ -32,7 +32,9 @@ def remove_nulls(s):
     >>> remove_nulls('hello\x00 world')
     'hello world'
     '''
-    if s is None:
+    if type(s) != str:
+        return s
+    elif s is None:
         return None
     else:
         return s.replace('\x00','')
@@ -115,7 +117,27 @@ def insert_tweet(connection,tweet):
 
         # create/update the user
         sql = sqlalchemy.sql.text('''
+            insert into users
+                (id_users, created_at, updated_at, id_urls, 
+                friends_count, listed_count, favourites_count, 
+                statuses_count, protected, verified, screen_name, 
+                name, location, description, withheld_in_countries)
+                values
+                (:id_users, :created_at, :updated_at, :id_urls, 
+                :friends_count, :listed_count, :favourites_count, 
+                :statuses_count, :protected, :verified, :screen_name, 
+                :name, :location, :description, :withheld_in_countries)
+                ON CONFLICT DO NOTHING;
             ''')
+       
+        keys = ('id', 'created_at', 'updated_at', 'friends_count', 'listed_count', 
+                'favourites_count', 'statuses_count', 'protected', 'verified', 
+                'screen_name', 'name', 'location', 'description')
+        
+        d = {key: remove_nulls(tweet['user'].get(key)) for key in keys}
+        d['id_urls'] = user_id_urls
+        d['withheld_in_countries'] = [remove_nulls(s) for s in tweet['user'].get('withheld_in_countries', [])]
+        res = connectiogeon.execute(sql,d).first()
 
         ########################################
         # insert into the tweets table
@@ -172,14 +194,47 @@ def insert_tweet(connection,tweet):
         # This means that every "in_reply_to_user_id" field must reference a valid entry in the users table.
         # If the id is not in the users table, then you'll need to add it in an "unhydrated" form.
         if tweet.get('in_reply_to_user_id',None) is not None:
-            sql=sqlalchemy.sql.text('''
+            sql=sqlalchemy.sql.text(f'''
+                insert into users
+                    (id_users)
+                    values
+                    (:id_users)
+                ON CONFLICT DO NOTHING;
                 ''')
+        d = {'id_users': tweet.get('in_reply_to_user_id',None)}
+        res = connection.execute(sql,d).first()
 
         # insert the tweet
-        sql=sqlalchemy.sql.text(f'''
+        sql=sqlalchemy.sql.text('''
+            insert into tweets
+                (id_tweets, id_users, created_at, in_reply_to_status_id,
+                in_reply_to_user_id, quoted_status_id, retweet_count, favorite_count,
+                quote_count, withheld_copyright, withheld_in_countries, source,
+                text, country_code, state_code, lang, place_name, geo)
+                values
+                (:id_tweets, :id_users, :created_at, :in_reply_to_status_id,
+                :in_reply_to_user_id, :quoted_status_id, :retweet_count, :favorite_count,
+                :quote_count, :withheld_copyright, :withheld_in_countries, :source,
+                :text, :country_code, :state_code, :lang, :place_name, :geo)
             ''')
 
-        ########################################
+        d = {}
+        d['geo']=geo_str + "(" + geo_coords + ")"   # http://postgis.net/workshops/postgis-intro/geometries.html
+        d['text']=remove_nulls(text)
+        d['country_code']=country_code
+        d['state_code']=state_code
+        d['place_name']=place_name
+
+        keys = ('id_tweets', 'id_users', 'created_at', 'in_reply_to_status_id',
+                'in_reply_to_user_id', 'quoted_status_id', 'retweet_count', 'favorite_count',
+                'quote_count', 'withheld_copyright', 'source', 'lang')
+
+        d = {key: remove_nulls(tweet['user'].get(key)) for key in keys}
+        d['id_urls'] = user_id_urls
+        d['withheld_in_countries'] = [remove_nulls(s) for s in tweet['user'].get('withheld_in_countries', [])]
+        res = connection.execute(sql,d).first()
+
+        #######################################
         # insert into the tweet_urls table
         ########################################
 
@@ -192,7 +247,13 @@ def insert_tweet(connection,tweet):
             id_urls = get_id_urls(url['expanded_url'], connection)
 
             sql=sqlalchemy.sql.text('''
+                insert into tweet_urls
+                    (id_tweets, id_urls)
+                    values
+                    (:id_tweets, :id_urls)
                 ''')
+            d = {'id_tweets':tweet['id'], 'id_urls':id_urls}
+            res = connection.execute(sql,d).first()
 
         ########################################
         # insert into the tweet_mentions table
@@ -202,7 +263,8 @@ def insert_tweet(connection,tweet):
             mentions = tweet['extended_tweet']['entities']['user_mentions']
         except KeyError:
             mentions = tweet['entities']['user_mentions']
-
+        
+        # list of users (dictionaries of data)
         for mention in mentions:
             # insert into users table;
             # note that we already have done an insert into the users table above for the user who sent a tweet;
@@ -212,11 +274,25 @@ def insert_tweet(connection,tweet):
             # HINT:
             # use the ON CONFLICT DO NOTHING syntax
             sql=sqlalchemy.sql.text('''
+                insert into users
+                    (id_users)
+                    values
+                    (:id_users)
+                    ON CONFLICT DO NOTHING;
                 ''')
+            d = {'id_users':mention['id']}
+            res = connection.execute(sql,d).first()
 
             # insert into tweet_mentions
             sql=sqlalchemy.sql.text('''
+                insert into tweet_mentions
+                    (id_tweets, id_users)
+                    values
+                    (:id_tweets, :id_users)
+                    ON CONFLICT DO NOTHING;
                 ''')
+            d = {'id_tweets': tweet['id'], 'id_users': mention['id']}
+            res = connection.execute(sql,d).first()
 
         ########################################
         # insert into the tweet_tags table
@@ -233,7 +309,14 @@ def insert_tweet(connection,tweet):
 
         for tag in tags:
             sql=sqlalchemy.sql.text('''
+                insert into tweet_tags
+                    (id_tweets, tag)
+                    values
+                    (:id_tweets, :tag)
+                    ON CONFLICT DO NOTHING;
                 ''')
+            d = {'id_tweets': tweet['id'], 'tag': tag}
+            res = connection.execute(sql, d).first()
 
         ########################################
         # insert into the tweet_media table
@@ -250,7 +333,14 @@ def insert_tweet(connection,tweet):
         for medium in media:
             id_urls = get_id_urls(medium['media_url'], connection)
             sql=sqlalchemy.sql.text('''
+                insert into tweet_media
+                    (id_tweets, id_urls, type)
+                    values
+                    (:id_tweets, :id_urls, :type)
+                    ON CONFLICT DO NOTHING
                 ''')
+            d = {'id_tweets':tweet['id'], 'id_urls':id_urls, 'type':medium['type']}
+            res = connection.execute(sql, d).first()
 
 ################################################################################
 # main functions
